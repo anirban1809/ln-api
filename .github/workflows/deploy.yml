@@ -38,8 +38,8 @@ jobs:
       - name: Build
         run: npm run build
       # If not bootstrapped for this account/region, do it once manually (see step 5)
-      - name: CDK Bootstrap
-        run: npx cdk bootstrap aws://779844646698/${{ env.AWS_REGION }}
+      # - name: CDK Bootstrap
+      #   run: npx cdk bootstrap aws://779844646698/${{ env.AWS_REGION }}
 
       - name: Synthesize
         run: npm run cdk:synth
