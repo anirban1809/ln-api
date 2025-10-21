@@ -112,7 +112,7 @@ const routes: Route[] = [
     handler: async (req) =>
       json(200, {
         ok: true,
-        msg: "Root route",
+        msg: "Root route 1",
         method: req.method,
         path: req.path,
       }),
