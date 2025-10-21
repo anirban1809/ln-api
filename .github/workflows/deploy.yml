@@ -46,7 +46,7 @@ jobs:
         run: npm run cdk:synth
 
       - name: Deploy
-        run: npx cdk deploy $STACK_NAME --app ./bin/app.ts --context env=${{ env.ENV }} --require-approval never
+        run: npx cdk deploy $STACK_NAME --context env=${{ env.ENV }} --require-approval never
 
       - name: Show API URL
         run: |
