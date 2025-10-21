@@ -1,0 +1,23 @@
+{
+  "name": "ln-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc && node scripts/build-lambda.mjs",
+    "cdk:synth": "cdk synth",
+    "cdk:diff": "cdk diff",
+    "cdk:deploy": "cdk deploy --require-approval never"
+  },
+  "devDependencies": {
+    "aws-cdk": "2.158.0",
+    "esbuild": "^0.25.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "@types/aws-lambda": "^8.10.156",
+    "aws-cdk-lib": "^2.220.0",
+    "constructs": "^10.3.0",
+    "source-map-support": "^0.5.21"
+  }
+}
