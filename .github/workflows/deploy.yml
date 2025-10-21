@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      AWS_REGION: ap-south-1
+      AWS_REGION: us-east-1
       ENV: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
       STACK_NAME: lambda-rest-api-${{ github.ref_name == 'main' && 'prod' || 'dev' }}
 
