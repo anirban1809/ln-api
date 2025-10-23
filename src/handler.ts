@@ -1,214 +1,288 @@
 // src/handler.ts
+import {
+  CognitoIdentityProviderClient,
+  SignUpCommand,
+  ConfirmSignUpCommand,
+  InitiateAuthCommand,
+  ChangePasswordCommand,
+} from "@aws-sdk/client-cognito-identity-provider";
 import type {
   APIGatewayProxyEvent,
   APIGatewayProxyEventV2,
   APIGatewayProxyResult,
 } from "aws-lambda";
 
-type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
+const REGION = "us-east-1";
+const CLIENT_ID = "4svgrm4b2mpb525nadl6gt682e";
+const DOMAIN = "https://us-east-1c2ij1z29m.auth.us-east-1.amazoncognito.com";
+const IS_PROD = true;
+
+const cip = new CognitoIdentityProviderClient({ region: REGION });
+
+// ---------- helpers ----------
 type Res = APIGatewayProxyResult;
 
-type Req = {
-  method: HttpMethod;
-  path: string;
-  query: Record<string, string | undefined>;
-  headers: Record<string, string | undefined>;
-  params: Record<string, string>;
-  body: any;
-  claims: Record<string, any> | null; // Cognito JWT claims when authorizer is enabled
-  rawEvent: APIGatewayProxyEvent | APIGatewayProxyEventV2;
-};
-
-type Handler = (req: Req) => Promise<Res> | Res;
-
-type Route = {
-  method: HttpMethod;
-  path: string; // supports /users/:id
-  handler: Handler;
-};
-
-// ----------------- helpers -----------------
-function trimSlashes(s: string) {
-  return s.replace(/^\/+|\/+$/g, "");
-}
-
-function matchPath(
-  template: string,
-  actual: string
-): { ok: boolean; params: Record<string, string> } {
-  const tParts = trimSlashes(template).split("/");
-  const aParts = trimSlashes(actual).split("/");
-  if (tParts.length !== aParts.length) return { ok: false, params: {} };
-  const params: Record<string, string> = {};
-  for (let i = 0; i < tParts.length; i++) {
-    const t = tParts[i],
-      a = aParts[i];
-    if (t.startsWith(":")) params[t.slice(1)] = decodeURIComponent(a);
-    else if (t !== a) return { ok: false, params: {} };
-  }
-  return { ok: true, params };
-}
-
 function json(
-  statusCode: number,
+  status: number,
   data: any,
   headers: Record<string, string> = {}
 ): Res {
   return {
-    statusCode,
+    statusCode: status,
     headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(data),
   };
 }
 
-function text(
-  statusCode: number,
-  body: string,
-  headers: Record<string, string> = {}
-): Res {
+function cookieHeader(
+  name: string,
+  value: string,
+  opts: Record<string, any> = {}
+): string {
+  const {
+    httpOnly = true,
+    secure = IS_PROD,
+    path = "/",
+    sameSite = IS_PROD ? "None" : "Lax",
+    maxAge = 60 * 60 * 24 * 30, // 30 days
+  } = opts;
+  const parts = [
+    `${name}=${value}`,
+    `Path=${path}`,
+    `Max-Age=${maxAge}`,
+    `SameSite=${sameSite}`,
+    httpOnly ? "HttpOnly" : "",
+    secure ? "Secure" : "",
+    DOMAIN ? `Domain=${DOMAIN}` : "",
+  ].filter(Boolean);
+  return parts.join("; ");
+}
+
+function extractCookie(cookieHeader?: string, name = "rt"): string | null {
+  if (!cookieHeader) return null;
+  const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function corsHeaders(origin?: string): Record<string, string> {
+  const allowOrigin = origin || "*";
   return {
-    statusCode,
-    headers: { "Content-Type": "text/plain; charset=utf-8", ...headers },
-    body,
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Allow-Headers": "content-type,authorization,x-csrf",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   };
 }
 
-function getMethodAndPath(event: any): { method: HttpMethod; path: string } {
-  const method = (event.requestContext?.http?.method ||
-    event.httpMethod ||
-    "GET") as HttpMethod;
-  const path = event.rawPath || event.path || "/";
-  return { method, path };
-}
+// ---------- handlers ----------
 
-function getQuery(event: any) {
-  return event.queryStringParameters || {};
-}
+// Signup
+async function handleSignup(event: any): Promise<Res> {
+  const origin = event.headers?.origin || event.headers?.Origin;
+  const headers = corsHeaders(origin);
+  const body = JSON.parse(event.body || "{}");
+  const { email, password, firstName, lastName } = body;
+  if (!email || !password)
+    return json(400, { error: "Missing email or password" }, headers);
 
-function getHeaders(event: any) {
-  return event.headers || {};
-}
-
-function parseBody(event: any): any {
-  if (!event.body) return null;
-  const raw = event.isBase64Encoded
-    ? Buffer.from(event.body, "base64").toString("utf8")
-    : event.body;
-  const ct = (
-    event.headers?.["content-type"] ||
-    event.headers?.["Content-Type"] ||
-    ""
-  ).toLowerCase();
-  if (ct.includes("application/json")) {
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return raw;
-    }
+  try {
+    await cip.send(
+      new SignUpCommand({
+        ClientId: CLIENT_ID,
+        Username: email,
+        Password: password,
+        UserAttributes: [
+          { Name: "email", Value: email },
+          { Name: "given_name", Value: firstName || "" },
+          { Name: "family_name", Value: lastName || "" },
+        ],
+      })
+    );
+    return json(
+      200,
+      { ok: true, message: "Signup successful. Please verify email." },
+      headers
+    );
+  } catch (e: any) {
+    return json(400, { error: e.message || "Signup failed" }, headers);
   }
-  return raw;
 }
 
-// Extract Cognito claims for REST APIs with a User Pool authorizer.
-// For REST APIs, claims are usually under requestContext.authorizer.claims
-// For HTTP APIs v2 w/ JWT authorizer, they are under requestContext.authorizer.jwt.claims
-function extractClaims(event: any): Record<string, any> | null {
-  return (
-    event?.requestContext?.authorizer?.claims ||
-    event?.requestContext?.authorizer?.jwt?.claims ||
-    null
-  );
+// Verify Email
+async function handleVerify(event: any): Promise<Res> {
+  const origin = event.headers?.origin || event.headers?.Origin;
+  const headers = corsHeaders(origin);
+  const body = JSON.parse(event.body || "{}");
+  const { email, code } = body;
+  if (!email || !code)
+    return json(400, { error: "Missing email or code" }, headers);
+
+  try {
+    await cip.send(
+      new ConfirmSignUpCommand({
+        ClientId: CLIENT_ID,
+        Username: email,
+        ConfirmationCode: code,
+      })
+    );
+    return json(
+      200,
+      { ok: true, message: "Email verified successfully." },
+      headers
+    );
+  } catch (e: any) {
+    return json(400, { error: e.message || "Verification failed" }, headers);
+  }
 }
 
-// ----------------- routes -----------------
-const routes: Route[] = [
-  // Unauthenticated if you configured API Gateway /public method without authorizer
-  {
-    method: "GET",
-    path: "/public/ping",
-    handler: async () => json(200, { pong: true }),
-  },
+// Login
+async function handleLogin(event: any): Promise<Res> {
+  const origin = event.headers?.origin || event.headers?.Origin;
+  const headers = corsHeaders(origin);
+  const body = JSON.parse(event.body || "{}");
+  const { email, password } = body;
+  if (!email || !password)
+    return json(400, { error: "Missing credentials" }, headers);
 
-  // Authenticated: return user identity from Cognito token
-  {
-    method: "GET",
-    path: "/me",
-    handler: async (req) => {
-      if (!req.claims) return json(401, { error: "Unauthorized" });
-      const { sub, email, "cognito:username": username, scope } = req.claims;
-      return json(200, { sub, username, email, scope });
-    },
-  },
+  try {
+    const resp = await cip.send(
+      new InitiateAuthCommand({
+        AuthFlow: "USER_PASSWORD_AUTH",
+        ClientId: CLIENT_ID,
+        AuthParameters: { USERNAME: email, PASSWORD: password },
+      })
+    );
+    const auth = resp.AuthenticationResult;
+    if (!auth?.AccessToken || !auth?.RefreshToken)
+      return json(401, { error: "Invalid login" }, headers);
 
-  // Simple examples
-  {
-    method: "GET",
-    path: "/hello",
-    handler: async (req) => {
-      const name = req.query.name ?? "world";
-      return json(200, { message: `Hello, ${name}!` });
-    },
-  },
+    const setCookie = cookieHeader("rt", encodeURIComponent(auth.RefreshToken));
+    return {
+      statusCode: 200,
+      headers: { ...headers, "Set-Cookie": setCookie },
+      body: JSON.stringify({
+        accessToken: auth.AccessToken,
+        expiresIn: auth.ExpiresIn,
+        idToken: auth.IdToken,
+      }),
+    };
+  } catch (e: any) {
+    return json(401, { error: e.message || "Login failed" }, headers);
+  }
+}
 
-  {
-    method: "GET",
-    path: "/users/:id",
-    handler: async (req) => json(200, { userId: req.params.id }),
-  },
+// Refresh Access Token
+async function handleRefresh(event: any): Promise<Res> {
+  const origin = event.headers?.origin || event.headers?.Origin;
+  const headers = corsHeaders(origin);
+  const cookieHeader = event.headers?.cookie || event.headers?.Cookie;
+  const rt = extractCookie(cookieHeader);
+  if (!rt) return json(401, { error: "Missing refresh token" }, headers);
 
-  {
-    method: "POST",
-    path: "/echo",
-    handler: async (req) => json(200, { received: req.body }),
-  },
-];
+  try {
+    const resp = await cip.send(
+      new InitiateAuthCommand({
+        AuthFlow: "REFRESH_TOKEN_AUTH",
+        ClientId: CLIENT_ID,
+        AuthParameters: { REFRESH_TOKEN: rt },
+      })
+    );
+    const auth = resp.AuthenticationResult;
+    if (!auth?.AccessToken)
+      return json(401, { error: "Invalid refresh" }, headers);
 
-// ----------------- entry -----------------
+    const newRt = auth.RefreshToken || rt;
+    const setCookie = cookieHeader("rt", encodeURIComponent(newRt));
+    return {
+      statusCode: 200,
+      headers: { ...headers, "Set-Cookie": setCookie },
+      body: JSON.stringify({
+        accessToken: auth.AccessToken,
+        expiresIn: auth.ExpiresIn,
+        idToken: auth.IdToken,
+      }),
+    };
+  } catch (e: any) {
+    return json(
+      401,
+      { error: e.message || "Failed to refresh token" },
+      headers
+    );
+  }
+}
+
+// Change Password
+async function handleChangePassword(event: any): Promise<Res> {
+  const origin = event.headers?.origin || event.headers?.Origin;
+  const headers = corsHeaders(origin);
+  const body = JSON.parse(event.body || "{}");
+  const { accessToken, previousPassword, proposedPassword } = body;
+
+  if (!accessToken || !previousPassword || !proposedPassword)
+    return json(400, { error: "Missing fields" }, headers);
+
+  try {
+    await cip.send(
+      new ChangePasswordCommand({
+        AccessToken: accessToken,
+        PreviousPassword: previousPassword,
+        ProposedPassword: proposedPassword,
+      })
+    );
+    return json(
+      200,
+      { ok: true, message: "Password changed successfully." },
+      headers
+    );
+  } catch (e: any) {
+    return json(
+      400,
+      { error: e.message || "Failed to change password" },
+      headers
+    );
+  }
+}
+
+// Logout
+async function handleLogout(event: any): Promise<Res> {
+  const origin = event.headers?.origin || event.headers?.Origin;
+  const headers = corsHeaders(origin);
+  const clear = cookieHeader("rt", "", { maxAge: 0 });
+  return {
+    statusCode: 204,
+    headers: { ...headers, "Set-Cookie": clear },
+    body: "",
+  };
+}
+
+// ---------- main ----------
 export async function main(
   event: APIGatewayProxyEvent | APIGatewayProxyEventV2
 ): Promise<Res> {
-  const { method, path } = getMethodAndPath(event);
-  const query = getQuery(event);
-  const headers = getHeaders(event);
-  const body = parseBody(event);
-  const claims = extractClaims(event);
+  const method =
+    (event.requestContext as any)?.http?.method ||
+    (event as any).httpMethod ||
+    "GET";
+  const path = (event as any).rawPath || (event as any).path || "/";
+  const normalized = path.toLowerCase();
 
-  const matches = routes
-    .map((r) => ({ r, m: matchPath(r.path, path) }))
-    .filter((x) => x.m.ok);
-  if (matches.length === 0) return json(404, { error: "Not Found", path });
-
-  const chosen = matches.find((x) => x.r.method === method);
-  if (!chosen) {
-    const allow = [...new Set(matches.map((x) => x.r.method))].join(", ");
-    return text(405, "Method Not Allowed", { Allow: allow });
+  if (method === "OPTIONS") {
+    const headers = corsHeaders(event.headers?.origin || event.headers?.Origin);
+    return { statusCode: 204, headers, body: "" };
   }
 
-  const req: Req = {
-    method,
-    path,
-    query,
-    headers,
-    params: chosen.m.params,
-    body,
-    claims,
-    rawEvent: event,
-  };
+  if (method === "POST" && normalized.endsWith("/auth/signup"))
+    return handleSignup(event);
+  if (method === "POST" && normalized.endsWith("/auth/verify"))
+    return handleVerify(event);
+  if (method === "POST" && normalized.endsWith("/auth/login"))
+    return handleLogin(event);
+  if (method === "POST" && normalized.endsWith("/auth/refresh"))
+    return handleRefresh(event);
+  if (method === "POST" && normalized.endsWith("/auth/change-password"))
+    return handleChangePassword(event);
+  if (method === "POST" && normalized.endsWith("/auth/logout"))
+    return handleLogout(event);
 
-  try {
-    const res = await chosen.r.handler(req);
-    // Add permissive CORS; API Gateway CORS is also configured in your stack
-    return {
-      ...res,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type,Authorization",
-        ...(res.headers || {}),
-      },
-    };
-  } catch (err) {
-    console.error("Handler error:", err);
-    return json(500, { error: "Internal Server Error" });
-  }
+  return json(404, { error: "Not Found", path });
 }
