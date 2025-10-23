@@ -74,12 +74,17 @@ function corsHeaders(origin?: string): Record<string, string> {
   };
 }
 
-// ---------- handlers ----------
+function extractClaims(event: any): Record<string, any> | null {
+  return (
+    event?.requestContext?.authorizer?.claims ||
+    event?.requestContext?.authorizer?.jwt?.claims ||
+    null
+  );
+}
 
-// Signup
+// ---------- handlers ----------
 async function handleSignup(event: any): Promise<Res> {
-  const origin = event.headers?.origin || event.headers?.Origin;
-  const headers = corsHeaders(origin);
+  const headers = corsHeaders(event.headers?.origin);
   const body = JSON.parse(event.body || "{}");
   const { email, password, firstName, lastName } = body;
   if (!email || !password)
@@ -108,10 +113,8 @@ async function handleSignup(event: any): Promise<Res> {
   }
 }
 
-// Verify Email
 async function handleVerify(event: any): Promise<Res> {
-  const origin = event.headers?.origin || event.headers?.Origin;
-  const headers = corsHeaders(origin);
+  const headers = corsHeaders(event.headers?.origin);
   const body = JSON.parse(event.body || "{}");
   const { email, code } = body;
   if (!email || !code)
@@ -135,10 +138,8 @@ async function handleVerify(event: any): Promise<Res> {
   }
 }
 
-// Login
 async function handleLogin(event: any): Promise<Res> {
-  const origin = event.headers?.origin || event.headers?.Origin;
-  const headers = corsHeaders(origin);
+  const headers = corsHeaders(event.headers?.origin);
   const body = JSON.parse(event.body || "{}");
   const { email, password } = body;
   if (!email || !password)
@@ -171,10 +172,8 @@ async function handleLogin(event: any): Promise<Res> {
   }
 }
 
-// Refresh Access Token
 async function handleRefresh(event: any): Promise<Res> {
-  const origin = event.headers?.origin || event.headers?.Origin;
-  const headers = corsHeaders(origin);
+  const headers = corsHeaders(event.headers?.origin);
   const cookieHeader = event.headers?.cookie || event.headers?.Cookie;
   const rt = extractCookie(cookieHeader);
   if (!rt) return json(401, { error: "Missing refresh token" }, headers);
@@ -211,13 +210,10 @@ async function handleRefresh(event: any): Promise<Res> {
   }
 }
 
-// Change Password
 async function handleChangePassword(event: any): Promise<Res> {
-  const origin = event.headers?.origin || event.headers?.Origin;
-  const headers = corsHeaders(origin);
+  const headers = corsHeaders(event.headers?.origin);
   const body = JSON.parse(event.body || "{}");
   const { accessToken, previousPassword, proposedPassword } = body;
-
   if (!accessToken || !previousPassword || !proposedPassword)
     return json(400, { error: "Missing fields" }, headers);
 
@@ -243,10 +239,8 @@ async function handleChangePassword(event: any): Promise<Res> {
   }
 }
 
-// Logout
 async function handleLogout(event: any): Promise<Res> {
-  const origin = event.headers?.origin || event.headers?.Origin;
-  const headers = corsHeaders(origin);
+  const headers = corsHeaders(event.headers?.origin);
   const clear = cookieHeader("rt", "", { maxAge: 0 });
   return {
     statusCode: 204,
@@ -265,12 +259,14 @@ export async function main(
     "GET";
   const path = (event as any).rawPath || (event as any).path || "/";
   const normalized = path.toLowerCase();
+  const claims = extractClaims(event);
 
   if (method === "OPTIONS") {
     const headers = corsHeaders(event.headers?.origin || event.headers?.Origin);
     return { statusCode: 204, headers, body: "" };
   }
 
+  // --- public routes ---
   if (method === "POST" && normalized.endsWith("/auth/signup"))
     return handleSignup(event);
   if (method === "POST" && normalized.endsWith("/auth/verify"))
@@ -283,6 +279,21 @@ export async function main(
     return handleChangePassword(event);
   if (method === "POST" && normalized.endsWith("/auth/logout"))
     return handleLogout(event);
+
+  // --- protected routes ---
+  if (!claims) {
+    const headers = corsHeaders(event.headers?.origin);
+    return json(
+      401,
+      { error: "Unauthorized: missing valid Cognito token" },
+      headers
+    );
+  }
+
+  // Example protected route
+  if (method === "GET" && normalized.endsWith("/me")) {
+    return json(200, { user: claims });
+  }
 
   return json(404, { error: "Not Found", path });
 }
