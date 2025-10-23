@@ -15,7 +15,7 @@ export class RestApiStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    // --- Lambda ---
+    // --- Lambda Function ---
     const fn = new lambda.Function(this, "ApiHandler", {
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: "handler.main",
@@ -25,12 +25,13 @@ export class RestApiStack extends Stack {
       environment: { NODE_OPTIONS: "--enable-source-maps" },
     });
 
-    // --- Logs + API ---
+    // --- Access Logs ---
     const accessLogs = new logs.LogGroup(this, "ApiAccessLogs", {
       retention: logs.RetentionDays.ONE_WEEK,
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
+    // --- API Gateway REST API ---
     const api = new apigw.RestApi(this, "RestApi", {
       restApiName: "lambda-rest-api",
       deployOptions: {
@@ -47,30 +48,14 @@ export class RestApiStack extends Stack {
 
     const integration = new apigw.LambdaIntegration(fn, { proxy: true });
 
-    // ===== Import existing User Pool (pick one of the two ways) =====
-
-    // Option 1: pass the User Pool ID via context or env
-    // e.g. cdk deploy ... --context userPoolId=ap-south-1_AbCdEf123
+    // --- Cognito Authorizer ---
     const userPoolId = "us-east-1_C2ij1z29M";
-    // if (!userPoolId) {
-    //   throw new Error(
-    //     "Missing userPoolId. Provide --context userPoolId=<POOL_ID> or set USER_POOL_ID."
-    //   );
-    // }
     const userPool = cognito.UserPool.fromUserPoolId(
       this,
       "ExistingUserPool",
       userPoolId
     );
 
-    // Option 2: if you prefer ARN (comment out Option 1 and use this)
-    // const userPool = cognito.UserPool.fromUserPoolArn(
-    //   this,
-    //   "ExistingUserPool",
-    //   "arn:aws:cognito-idp:<region>:<account>:userpool/<POOL_ID>"
-    // );
-
-    // Create a Cognito User Pools Authorizer referencing the existing pool
     const authorizer = new apigw.CognitoUserPoolsAuthorizer(
       this,
       "CognitoAuth",
@@ -80,23 +65,49 @@ export class RestApiStack extends Stack {
       }
     );
 
-    // Protect root and proxy with Cognito
+    // --- Public Routes (/auth/*) ---
+    const auth = api.root.addResource("auth");
+
+    const signup = auth.addResource("signup");
+    signup.addMethod("POST", integration, {
+      authorizationType: apigw.AuthorizationType.NONE,
+    });
+
+    const verify = auth.addResource("verify");
+    verify.addMethod("POST", integration, {
+      authorizationType: apigw.AuthorizationType.NONE,
+    });
+
+    const login = auth.addResource("login");
+    login.addMethod("POST", integration, {
+      authorizationType: apigw.AuthorizationType.NONE,
+    });
+
+    const refresh = auth.addResource("refresh");
+    refresh.addMethod("POST", integration, {
+      authorizationType: apigw.AuthorizationType.NONE,
+    });
+
+    const changePassword = auth.addResource("change-password");
+    changePassword.addMethod("POST", integration, {
+      authorizationType: apigw.AuthorizationType.NONE,
+    });
+
+    const logout = auth.addResource("logout");
+    logout.addMethod("POST", integration, {
+      authorizationType: apigw.AuthorizationType.NONE,
+    });
+
+    // --- Protected routes (default proxy) ---
     api.root.addMethod("ANY", integration, {
       authorizer,
       authorizationType: apigw.AuthorizationType.COGNITO,
-      // authorizationScopes: ["api/read"] // only if you use resource-server scopes
     });
 
     const proxy = api.root.addResource("{proxy+}");
     proxy.addMethod("ANY", integration, {
       authorizer,
       authorizationType: apigw.AuthorizationType.COGNITO,
-    });
-
-    // OPTIONAL: unauthenticated public path
-    const pub = api.root.addResource("public");
-    pub.addMethod("ANY", integration, {
-      authorizationType: apigw.AuthorizationType.NONE,
     });
 
     new CfnOutput(this, "ApiUrl", { value: api.url });
