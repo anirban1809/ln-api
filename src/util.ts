@@ -21,7 +21,7 @@ export function cookieHeader(
     httpOnly = true,
     secure = true,
     path = "/",
-    sameSite = "None",
+    sameSite = "Lax",
     maxAge = 60 * 60 * 24 * 30, // 30 days
   } = opts;
   const parts = [
@@ -30,7 +30,6 @@ export function cookieHeader(
     `Max-Age=${maxAge}`,
     secure ? "Secure" : "",
     `SameSite=${sameSite}`,
-    `Domain=localhost`,
     httpOnly ? "HttpOnly" : "",
   ].filter(Boolean);
   return parts.join("; ");
