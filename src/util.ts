@@ -28,9 +28,10 @@ export function cookieHeader(
     `${name}=${value}`,
     `Path=${path}`,
     `Max-Age=${maxAge}`,
-    `SameSite=${sameSite}`,
-    httpOnly ? "HttpOnly" : "",
     secure ? "Secure" : "",
+    `SameSite=${sameSite}`,
+    `Domain=localhost`,
+    httpOnly ? "HttpOnly" : "",
   ].filter(Boolean);
   return parts.join("; ");
 }
