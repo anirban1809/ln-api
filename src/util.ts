@@ -19,9 +19,9 @@ export function cookieHeader(
 ): string {
   const {
     httpOnly = true,
-    secure = true,
+    secure = false,
     path = "/",
-    sameSite = "none",
+    sameSite = "Lax",
     maxAge = 60 * 60 * 24 * 30, // 30 days
   } = opts;
   const parts = [
