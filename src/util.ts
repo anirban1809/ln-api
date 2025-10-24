@@ -48,7 +48,7 @@ export function extractCookie(
 export function corsHeaders(origin?: string): Record<string, string> {
   const allowOrigin = origin || "*";
   return {
-    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Origin": origin || "http://localhost:8080",
     "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Headers": "content-type,authorization,x-csrf",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
