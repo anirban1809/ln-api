@@ -19,7 +19,7 @@ export function cookieHeader(
 ): string {
   const {
     httpOnly = true,
-    secure = false,
+    secure = true,
     path = "/",
     sameSite = "None",
     maxAge = 60 * 60 * 24 * 30, // 30 days
