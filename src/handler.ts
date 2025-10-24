@@ -58,9 +58,9 @@ export async function main(
   if (method === "POST" && normalized.endsWith("/auth/logout"))
     return handleLogout(event);
 
+  const headers = corsHeaders(event.headers?.origin);
   // --- protected routes ---
   if (!claims) {
-    const headers = corsHeaders(event.headers?.origin);
     return json(
       401,
       { error: "Unauthorized: missing valid Cognito token" },
@@ -70,7 +70,7 @@ export async function main(
 
   // Example protected route
   if (method === "GET" && normalized.endsWith("/me")) {
-    return json(200, { user: claims });
+    return json(200, { user: claims }, headers);
   }
 
   return json(404, { error: "Not Found", path });
