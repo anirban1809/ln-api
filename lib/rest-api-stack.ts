@@ -42,7 +42,7 @@ export class RestApiStack extends Stack {
       defaultCorsPreflightOptions: {
         allowHeaders: apigw.Cors.DEFAULT_HEADERS,
         allowMethods: apigw.Cors.ALL_METHODS,
-        allowOrigins: apigw.Cors.ALL_ORIGINS,
+        allowOrigins: [...apigw.Cors.ALL_ORIGINS, "http://localhost:8080"],
       },
     });
 
