@@ -21,7 +21,7 @@ export function cookieHeader(
     httpOnly = true,
     secure = true,
     path = "/",
-    sameSite = "Lax",
+    sameSite = "none",
     maxAge = 60 * 60 * 24 * 30, // 30 days
   } = opts;
   const parts = [
@@ -47,7 +47,7 @@ export function extractCookie(
 export function corsHeaders(origin?: string): Record<string, string> {
   const allowOrigin = origin || "*";
   return {
-    "Access-Control-Allow-Origin": origin || "http://localhost:8080",
+    "Access-Control-Allow-Origin": "http://localhost:8080",
     "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Headers": "content-type,authorization,x-csrf",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
